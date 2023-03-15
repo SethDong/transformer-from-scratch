@@ -9,6 +9,8 @@ class Vocabulary:
     EOS = "EOS"
     PAD = "PAD"
 
+    # 初始化 vocabulary 对象， 将tokenized句子保存在 add_token
+    # 这个 类 实现了动态词表， 就是说 给出的句子序列中 所有的词，构成了词表的编制依据，因此，存在OoB问题。
     def __init__(self, list_of_sentences: Optional[List[str]]):
         self.token2index = {self.BOS: 0, self.EOS: 1, self.PAD: 2}
         self.index2token = {v: k for k, v in self.token2index.items()}
@@ -54,6 +56,8 @@ class Vocabulary:
         tokens = self.tokenize(sentence, add_special_tokens)
         return [self.token2index[token] for token in tokens]
 
+
+    # 根据batch中最长的长度，对batch中所有的句子做padding （向后）
     def batch_encode(
         self, sentences: List[str], padding=True, add_special_tokens: bool = False
     ) -> List[List[int]]:
@@ -151,6 +155,7 @@ class TestVocabulary(unittest.TestCase):
             output,
             [[3, 4, 5, 6, 2, 2, 2], [3, 4, 7, 8, 9, 10, 6], [11, 6, 2, 2, 2, 2, 2]],
         )
+        print(output)
 
 
 if __name__ == "__main__":

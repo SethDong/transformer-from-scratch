@@ -5,28 +5,42 @@ import torch
 
 from vocabulary import Vocabulary
 
-
+# 得到一个 seq_len * seq_len 大小的矩阵， 该矩阵的主对角线和之下的部分 全部为True 其余部分为False
+# 这样就起到 遮蔽作用
 def construct_future_mask(seq_len: int):
     """
     Construct a binary mask that contains 1's for all valid connections and 0's for all outgoing future connections.
     This mask will be applied to the attention logits in decoder self-attention such that all logits with a 0 mask
     are set to -inf.
 
+    在自注意力机制中，为了避免模型在预测时使用后面的信息，通常需要将当前时间步之后的部分屏蔽掉。这个过程就需要使用到一个二元掩码（binary mask），
+    其中所有当前时间步之后的位置都被掩盖掉了。
+
+    在该函数中，构建的二元掩码是一个上三角矩阵，其中主对角线及其以下部分被赋值为1，而主对角线以上的部分都被赋值为0。
+    这是因为，主对角线及其以下部分对应着所有前面的位置，而主对角线以上的部分对应着当前时间步之后的位置。
+
+    然后，将这个掩码应用到解码器的自注意力机制中，用于掩盖掉那些当前时间步之后的位置。
+    具体来说，对于那些被掩盖掉的位置，会将其对应的注意力得分（即注意力logits）设置为负无穷大（-inf），从而在softmax归一化时将它们归为0，不对后续计算产生影响。
+    这样就能保证模型只关注当前时间步之前的信息，避免了未来信息对预测的影响。
+
     :param seq_len: length of the input sequence
     :return: (seq_len,seq_len) mask
     """
+
+    ## torch.triu 用来返回对输入矩阵取上三角， diagonal参数为对角线偏移量=1，表示取第一条对角线之上的部分（去掉主对角线及其以下部分）
+    ### torch.full 创建指定大小的张量，并填充一个指定的标量值 此处创建了一个 seq_len * seq_len 所有值都为1 的矩阵
     subsequent_mask = torch.triu(torch.full((seq_len, seq_len), 1), diagonal=1)
     return subsequent_mask == 0
 
 
 def construct_batches(
-    corpus: List[Dict[str, str]],
+    corpus: List[Dict[str, str]],  # 对齐的 源 和 目的 语句打包而成的字典的列表
     vocab: Vocabulary,
     batch_size: int,
-    src_lang_key: str,
-    tgt_lang_key: str,
+    src_lang_key: str,              # 源语言的标识
+    tgt_lang_key: str,              # 目的语言的标识
     device: Optional[torch.device] = None,
-) -> Tuple[Dict[str, List[torch.Tensor]], Dict[str, List[torch.Tensor]]]:
+) -> Tuple[Dict[str, List[torch.Tensor]], Dict[str, List[torch.Tensor]]]:  # 返回含有两个字典的元组，第一个字典表示batches，第二个字典表示注意力遮罩
     """
     Constructs batches given a corpus.
 
@@ -41,8 +55,9 @@ def construct_batches(
     pad_token_id = vocab.token2index[vocab.PAD]
     batches: Dict[str, List] = {"src": [], "tgt": []}
     masks: Dict[str, List] = {"src": [], "tgt": []}
-    for i in range(0, len(corpus), batch_size):
-        src_batch = torch.IntTensor(
+    for i in range(0, len(corpus), batch_size):  # （步长为batch_size） 就是说每隔batch_size取一个
+        src_batch = torch.IntTensor(    # 通过 torch.IntTensor可以将数据转换为整型tensor，以适应torch运算
+            # 通过 vocabulary 对象的 batch_encode() 方法将 每个batch的 src 语句 进行padding和id化
             vocab.batch_encode(
                 [pair[src_lang_key] for pair in corpus[i : i + batch_size]],
                 add_special_tokens=True,
@@ -57,8 +72,8 @@ def construct_batches(
             )
         )
 
-        src_padding_mask = src_batch != pad_token_id
-        future_mask = construct_future_mask(tgt_batch.shape[-1])
+        src_padding_mask = src_batch != pad_token_id    # 判断整数序列 src_batch 中是否存在填充符 pad_token_id, 返回的是src_batch形状的，boolean数组
+        future_mask = construct_future_mask(tgt_batch.shape[-1])  # 获取到seq_len, 传入遮罩函数 得到遮罩矩阵
 
         # Move tensors to gpu; if available
         if device is not None:
@@ -66,6 +81,7 @@ def construct_batches(
             tgt_batch = tgt_batch.to(device)  # type: ignore
             src_padding_mask = src_padding_mask.to(device)
             future_mask = future_mask.to(device)
+        # 将每个batch的数据都加入到字典列表中
         batches["src"].append(src_batch)
         batches["tgt"].append(tgt_batch)
         masks["src"].append(src_padding_mask)
